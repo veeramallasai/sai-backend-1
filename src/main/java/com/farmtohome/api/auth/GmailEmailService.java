@@ -1,17 +1,20 @@
 package com.farmtohome.api.auth;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import jakarta.annotation.PostConstruct;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
-import com.farmtohome.api.common.ApiException;
 
 @Service
 public class GmailEmailService {
@@ -23,6 +26,8 @@ public class GmailEmailService {
   private final String configuredUsername;
   private final String configuredPassword;
   private final String mailFrom;
+  private final String resendApiKey;
+  private final String resendFrom;
 
   public GmailEmailService(
       JavaMailSender mailSender,
@@ -30,46 +35,49 @@ public class GmailEmailService {
       @Value("${spring.mail.port:587}") int port,
       @Value("${spring.mail.username:mail.farmtohomef@gmail.com}") String username,
       @Value("${spring.mail.password:ozwykgdylurdgsqb}") String password,
-      @Value("${app.mail-from:mail.farmtohomef@gmail.com}") String mailFrom) {
+      @Value("${app.mail-from:mail.farmtohomef@gmail.com}") String mailFrom,
+      @Value("${app.resend-api-key:${RESEND_API_KEY:}}") String resendApiKey,
+      @Value("${app.resend-from:${RESEND_FROM:onboarding@resend.dev}}") String resendFrom) {
     this.mailSender = mailSender;
     this.host = host == null ? "smtp.gmail.com" : host.trim();
     this.port = port;
     this.configuredUsername = username == null ? "mail.farmtohomef@gmail.com" : username.trim();
     this.configuredPassword = password == null ? "ozwykgdylurdgsqb" : password.trim();
     this.mailFrom = mailFrom == null ? "mail.farmtohomef@gmail.com" : mailFrom.trim();
+    this.resendApiKey = resendApiKey == null ? "" : resendApiKey.trim();
+    this.resendFrom = resendFrom == null ? "onboarding@resend.dev" : resendFrom.trim();
   }
 
   @PostConstruct
   public void logStartupInfo() {
-    log.info("================ Gmail SMTP Configuration ================");
+    log.info("================ Email Service Configuration ================");
+    log.info("Resend HTTP API key present: {}", !resendApiKey.isEmpty());
+    log.info("Resend Sender (RESEND_FROM): {}", resendFrom);
     log.info("Gmail SMTP host: {}", host);
     log.info("Gmail SMTP port: {}", port);
     log.info("Gmail SMTP configured username: {}", configuredUsername);
-    log.info("Gmail SMTP password length: {}", configuredPassword.replaceAll("\\s+", "").length());
     log.info("Gmail Sender (MAIL_FROM): {}", mailFrom);
-    log.info("==========================================================");
+    log.info("=============================================================");
   }
 
   public boolean sendOtpEmail(String toEmail, String otp, String subject, String messageType) {
     log.info("Generated {} OTP for [{}]: {}", messageType, toEmail, otp);
 
-    String cleanPassword = configuredPassword.replaceAll("\\s+", "");
-    String spacedPassword = cleanPassword.replaceAll(".{4}", "$0 ").trim();
-
-    String[] candidateUsernames = new String[] {
-        configuredUsername,
-        "farmtohomef@gmail.com",
-        "mail.farmtohomef@gmail.com"
-    };
-
-    String[] candidatePasswords = new String[] {
-        cleanPassword,
-        spacedPassword
-    };
-
     String textContent = String.format(
         "Your Farm To Home %s OTP is: %s\n\nThis OTP expires in 5 minutes.\nDo not share this OTP with anyone.",
         messageType, otp);
+
+    // 1. Try Resend HTTP REST API (Port 443 - Fast & Cloud Firewall safe)
+    if (!resendApiKey.isEmpty()) {
+      if (tryResendApi(toEmail, otp, subject, textContent)) {
+        return true;
+      }
+    }
+
+    // 2. Fallback to Gmail SMTP with strict 2-second timeout
+    String cleanPassword = configuredPassword.replaceAll("\\s+", "");
+    String[] candidateUsernames = new String[] { configuredUsername };
+    String[] candidatePasswords = new String[] { cleanPassword };
 
     Exception lastException = null;
 
@@ -96,9 +104,9 @@ public class GmailEmailService {
           props.put("mail.smtp.starttls.enable", "true");
           props.put("mail.smtp.starttls.required", "true");
           props.put("mail.smtp.ssl.trust", "smtp.gmail.com");
-          props.put("mail.smtp.connectiontimeout", "10000");
-          props.put("mail.smtp.timeout", "10000");
-          props.put("mail.smtp.writetimeout", "10000");
+          props.put("mail.smtp.connectiontimeout", "2000");
+          props.put("mail.smtp.timeout", "2000");
+          props.put("mail.smtp.writetimeout", "2000");
 
           MimeMessage message = impl.createMimeMessage();
           MimeMessageHelper helper = new MimeMessageHelper(message, StandardCharsets.UTF_8.name());
@@ -118,7 +126,52 @@ public class GmailEmailService {
       }
     }
 
-    log.error("All Gmail SMTP delivery attempts failed for recipient {}: {}", toEmail, lastException != null ? lastException.getMessage() : "Unknown error", lastException);
+    log.warn("Email delivery attempts failed for recipient {}: {}", toEmail, lastException != null ? lastException.getMessage() : "No provider succeeded");
     return false;
+  }
+
+  private boolean tryResendApi(String toEmail, String otp, String subject, String textContent) {
+    try {
+      String jsonBody = String.format(
+          "{\"from\":\"%s\",\"to\":[\"%s\"],\"subject\":\"%s\",\"text\":\"%s\"}",
+          escapeJson(resendFrom),
+          escapeJson(toEmail),
+          escapeJson(subject),
+          escapeJson(textContent));
+
+      HttpClient client = HttpClient.newBuilder()
+          .connectTimeout(Duration.ofSeconds(3))
+          .build();
+
+      HttpRequest request = HttpRequest.newBuilder()
+          .uri(URI.create("https://api.resend.com/emails"))
+          .header("Authorization", "Bearer " + resendApiKey)
+          .header("Content-Type", "application/json")
+          .timeout(Duration.ofSeconds(3))
+          .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
+          .build();
+
+      log.info("Attempting Resend HTTP REST API delivery to [{}]...", toEmail);
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+      if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        log.info("Successfully delivered OTP email to {} via Resend HTTP API. Status: {}", toEmail, response.statusCode());
+        return true;
+      } else {
+        log.warn("Resend HTTP API returned status {}: {}", response.statusCode(), response.body());
+      }
+    } catch (Exception ex) {
+      log.warn("Resend HTTP API delivery attempt failed for recipient {}: {}", toEmail, ex.getMessage());
+    }
+    return false;
+  }
+
+  private String escapeJson(String input) {
+    if (input == null) return "";
+    return input.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
   }
 }

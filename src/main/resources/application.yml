@@ -60,6 +60,8 @@ app:
   firebase-project-id: ${FIREBASE_PROJECT_ID:farm-to-home-8c520}
   cors-origins: "${CORS_ORIGINS:http://localhost:*,http://127.0.0.1:*}"
   mail-from: ${MAIL_FROM:mail.farmtohomef@gmail.com}
+  resend-api-key: ${RESEND_API_KEY:}
+  resend-from: ${RESEND_FROM:onboarding@resend.dev}
 
 logging:
   level:
