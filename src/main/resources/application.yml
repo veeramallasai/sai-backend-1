@@ -1,0 +1,67 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: farm-to-home-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/farm_to_home}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:Gopi@786}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: 2
+      connection-timeout: 20000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+  mail:
+    host: ${SPRING_MAIL_HOST:smtp.gmail.com}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME:mail.farmtohomef@gmail.com}
+    password: ${SPRING_MAIL_PASSWORD:ozwykgdylurdgsqb}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          ssl:
+            trust: smtp.gmail.com
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+app:
+  firebase-project-id: ${FIREBASE_PROJECT_ID:farm-to-home-8c520}
+  cors-origins: "${CORS_ORIGINS:http://localhost:*,http://127.0.0.1:*}"
+  mail-from: ${MAIL_FROM:mail.farmtohomef@gmail.com}
+
+logging:
+  level:
+    root: INFO
+    org.springframework.security: WARN
