@@ -118,9 +118,7 @@ public class GmailEmailService {
       }
     }
 
-    log.error("All Gmail SMTP delivery attempts failed for recipient {}", toEmail, lastException);
-    throw new ApiException(
-        HttpStatus.BAD_REQUEST,
-        "Gmail SMTP Authentication/Delivery failed: " + (lastException == null ? "Unknown error" : lastException.getMessage()));
+    log.error("All Gmail SMTP delivery attempts failed for recipient {}: {}", toEmail, lastException != null ? lastException.getMessage() : "Unknown error", lastException);
+    return false;
   }
 }

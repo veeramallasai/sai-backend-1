@@ -625,8 +625,12 @@ public class PasswordSetupService {
   }
 
   private String resolveEmail(String uid, String targetEmail) {
-    if (targetEmail != null && !targetEmail.isBlank() && targetEmail.contains("@")) {
-      return targetEmail.trim().toLowerCase(java.util.Locale.ROOT);
+    if (targetEmail != null && !targetEmail.isBlank()) {
+      String trimmed = targetEmail.trim().toLowerCase(java.util.Locale.ROOT);
+      if (!trimmed.contains("@")) {
+        throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid email address format: '" + targetEmail + "'. Email must contain '@'.");
+      }
+      return trimmed;
     }
     String otpEmail = latestOtpEmail(uid);
     if (otpEmail != null) {
@@ -641,7 +645,7 @@ public class PasswordSetupService {
     if (uid != null && uid.contains("@")) {
       return uid.trim().toLowerCase(java.util.Locale.ROOT);
     }
-    throw new ApiException(HttpStatus.BAD_REQUEST, "Email address is required.");
+    throw new ApiException(HttpStatus.BAD_REQUEST, "Email address is required. Please provide a JSON request body with 'email' (e.g. {\"email\":\"user@example.com\"}).");
   }
 
   private String latestOtpEmail(String uid) {
