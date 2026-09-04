@@ -94,12 +94,19 @@ public class EmailOtpService {
 
     boolean deliverySuccess = sendMail(email, otp);
 
+    if (!deliverySuccess) {
+      log.error("Email delivery failed for recipient '{}'. RESEND_API_KEY may be missing or invalid in Railway environment variables.", email);
+      throw new ApiException(
+          HttpStatus.BAD_GATEWAY,
+          "Failed to deliver OTP email to " + email + ". Please verify RESEND_API_KEY configuration in Railway environment variables.");
+    }
+
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("email", email);
     result.put("maskedEmail", mask(email));
     result.put("alreadyVerified", false);
     result.put("expiresInSeconds", OTP_TTL_MINUTES * 60);
-    result.put("deliverySuccess", deliverySuccess);
+    result.put("deliverySuccess", true);
     return result;
   }
 

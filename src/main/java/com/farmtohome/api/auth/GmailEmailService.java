@@ -36,8 +36,8 @@ public class GmailEmailService {
       @Value("${spring.mail.username:mail.farmtohomef@gmail.com}") String username,
       @Value("${spring.mail.password:ozwykgdylurdgsqb}") String password,
       @Value("${app.mail-from:mail.farmtohomef@gmail.com}") String mailFrom,
-      @Value("${app.resend-api-key:${RESEND_API_KEY:}}") String resendApiKey,
-      @Value("${app.resend-from:${RESEND_FROM:onboarding@resend.dev}}") String resendFrom) {
+      @Value("${RESEND_API_KEY:${app.resend-api-key:${resend.api.key:${RESEND_KEY:}}}}") String resendApiKey,
+      @Value("${RESEND_FROM:${app.resend-from:${resend.from:onboarding@resend.dev}}}") String resendFrom) {
     this.mailSender = mailSender;
     this.host = host == null ? "smtp.gmail.com" : host.trim();
     this.port = port;
@@ -52,6 +52,11 @@ public class GmailEmailService {
   public void logStartupInfo() {
     log.info("================ Email Service Configuration ================");
     log.info("Resend HTTP API key present: {}", !resendApiKey.isEmpty());
+    if (!resendApiKey.isEmpty()) {
+      log.info("Resend API Key prefix: {}...", resendApiKey.substring(0, Math.min(6, resendApiKey.length())));
+    } else {
+      log.warn("RESEND_API_KEY is NOT set in Railway environment variables. Add RESEND_API_KEY to Railway variables to enable instant email delivery.");
+    }
     log.info("Resend Sender (RESEND_FROM): {}", resendFrom);
     log.info("Gmail SMTP host: {}", host);
     log.info("Gmail SMTP port: {}", port);
@@ -72,6 +77,8 @@ public class GmailEmailService {
       if (tryResendApi(toEmail, otp, subject, textContent)) {
         return true;
       }
+    } else {
+      log.warn("RESEND_API_KEY environment variable is not configured in Railway. Outbound Resend HTTP API skipped.");
     }
 
     // 2. Fallback to Gmail SMTP with strict 2-second timeout
@@ -126,7 +133,7 @@ public class GmailEmailService {
       }
     }
 
-    log.warn("Email delivery attempts failed for recipient {}: {}", toEmail, lastException != null ? lastException.getMessage() : "No provider succeeded");
+    log.error("All email delivery attempts failed for recipient {}: {}", toEmail, lastException != null ? lastException.getMessage() : "No active provider succeeded");
     return false;
   }
 
@@ -140,14 +147,14 @@ public class GmailEmailService {
           escapeJson(textContent));
 
       HttpClient client = HttpClient.newBuilder()
-          .connectTimeout(Duration.ofSeconds(3))
+          .connectTimeout(Duration.ofSeconds(4))
           .build();
 
       HttpRequest request = HttpRequest.newBuilder()
           .uri(URI.create("https://api.resend.com/emails"))
           .header("Authorization", "Bearer " + resendApiKey)
           .header("Content-Type", "application/json")
-          .timeout(Duration.ofSeconds(3))
+          .timeout(Duration.ofSeconds(4))
           .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
           .build();
 
@@ -158,10 +165,10 @@ public class GmailEmailService {
         log.info("Successfully delivered OTP email to {} via Resend HTTP API. Status: {}", toEmail, response.statusCode());
         return true;
       } else {
-        log.warn("Resend HTTP API returned status {}: {}", response.statusCode(), response.body());
+        log.error("Resend HTTP API returned failure status {}: {}", response.statusCode(), response.body());
       }
     } catch (Exception ex) {
-      log.warn("Resend HTTP API delivery attempt failed for recipient {}: {}", toEmail, ex.getMessage());
+      log.error("Resend HTTP API delivery attempt failed for recipient {}: {}", toEmail, ex.getMessage(), ex);
     }
     return false;
   }
